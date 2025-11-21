@@ -113,11 +113,6 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen }) {
           <p className="text-gray-500">Built with ❤️ by Jay Rana</p>
         </div>
 
-        <style>{`
-          .animation-delay-2000 {
-            animation-delay: 2s;
-          }
-        `}</style>
       </aside>
     </>
   );

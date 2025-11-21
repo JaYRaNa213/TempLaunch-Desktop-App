@@ -108,16 +108,7 @@ export default function Dashboard() {
   );
 
   return (
-    <div className="min-h-screen bg-black relative overflow-hidden">
-      {/* Animated Background */}
-      <div className="absolute inset-0">
-        <div className="absolute inset-0 bg-black"></div>
-        <div className="absolute top-0 left-1/4 w-96 h-96 "></div>
-        
-       
-      </div>
-
-      <div className="relative z-10">
+    <div className="min-h-screen bg-[#050505]">
         {/* Header */}
         <div className="bg-[#0d131f]">
           <div className="max-w-7xl mx-auto px-6 py-6">
@@ -155,11 +146,6 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
-        </div>
-
-
-
-
 <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -473,13 +459,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <style >{`
-        .animation-delay-2000 {
-          animation-delay: 2s;
-        }
-        .animation-delay-4000 {
-          animation-delay: 4s;
-        }
+      <style>{`
         .line-clamp-2 {
           display: -webkit-box;
           -webkit-line-clamp: 2;

@@ -1,6 +1,5 @@
 
 
-
 // electron.cjs
 const { app, BrowserWindow, BrowserView, ipcMain } = require("electron");
 const path = require("path");
@@ -219,9 +218,10 @@ function createWindow() {
   });
 
   // ✅ Suppress Autofill spam
-  win.webContents.on("console-message", (event, level, message) => {
-    if (message.includes("Autofill")) event.preventDefault();
-  });
+  win.webContents.on("console-message", (event) => {
+  const message = event.message;
+  if (message.includes("Autofill")) event.preventDefault();
+});
 
   // ✅ CSP for production
   if (!isDev) {
@@ -346,7 +346,8 @@ ipcMain.handle("close-tab", (event, index) => {
   try {
     if (removed.view) {
       win.removeBrowserView(removed.view);
-      removed.view.destroy();
+      removed.view.webContents.destroy();
+
     }
   } catch (err) {
     console.warn("⚠️ Failed to clean up tab view:", err.message);

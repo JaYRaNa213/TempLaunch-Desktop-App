@@ -127,10 +127,7 @@ const handleDelete = async (id, title) => {
   const averageUsage = templates.length > 0 ? Math.round(totalUsage / templates.length) : 0;
 
   return (
-    <div className="min-h-screen bg-black relative overflow-hidden">
-     
-
-      <div className="relative z-10">
+    <div className="min-h-screen bg-[#050505]">
         {/* Header */}
         <div className="bg-black/50 backdrop-blur-xl border-b border-gray-800/50 sticky top-0 z-20">
           <div className="max-w-7xl mx-auto px-6 py-6">
@@ -473,15 +470,7 @@ const handleDelete = async (id, title) => {
             </div>
           )}
         </div>
-      </div>
-
       <style>{`
-        .animation-delay-2000 {
-          animation-delay: 2s;
-        }
-        .animation-delay-4000 {
-          animation-delay: 4s;
-        }
         .line-clamp-2 {
           display: -webkit-box;
           -webkit-line-clamp: 2;
