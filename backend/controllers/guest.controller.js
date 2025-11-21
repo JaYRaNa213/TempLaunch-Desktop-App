@@ -7,23 +7,29 @@ const extractApps = (payload = {}) => {
     .filter(Boolean);
 };
 
+const extractAppLaunchers = (payload = {}) => {
+  if (!Array.isArray(payload.appLaunchers)) return [];
+  return payload.appLaunchers.filter((entry) => entry && typeof entry === "object");
+};
+
 export const launchGuestTemplate = async (req, res) => {
   try {
     const template = req.body || {};
     const apps = extractApps(template);
+    const appLaunchers = extractAppLaunchers(template);
 
-    if (!apps.length) {
+    if (!apps.length && !appLaunchers.length) {
       return res
         .status(400)
         .json({ success: false, message: "No apps provided to launch" });
     }
 
-    await launchApps({ apps });
+    await launchApps({ apps, appLaunchers });
 
     res.json({
       success: true,
       message: "Guest template launch triggered",
-      launched: apps.length,
+      launched: appLaunchers.length || apps.length,
     });
   } catch (error) {
     console.error("❌ Guest launch failed:", error.message);

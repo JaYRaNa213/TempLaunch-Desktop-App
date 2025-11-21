@@ -24,6 +24,22 @@ const templateSchema = new mongoose.Schema(
     title: { type: String, required: true },
     description: { type: String },
     apps: [{ type: String, required: true }],
+    appLaunchers: [
+      {
+        _id: false,
+        id: { type: String },
+        label: { type: String },
+        path: { type: String, required: true },
+        args: [{ type: String }],
+        cwd: { type: String },
+        mode: {
+          type: String,
+          enum: ["generic", "vscode"],
+          default: "generic",
+        },
+        folderPath: { type: String },
+      },
+    ],
     websites: [{ type: String }],
     usageCount: { type: Number, default: 0 },
     schedule: { type: String, default: null },

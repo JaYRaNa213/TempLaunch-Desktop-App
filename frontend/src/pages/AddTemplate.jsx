@@ -1,5 +1,5 @@
 // AddTemplate.jsx
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
@@ -33,10 +33,35 @@ import { createTemplate } from "../services/TemplateService";
 
 import { useAuth } from "../context/AuthContext";
 
+const generateEntryId = () => {
+  if (typeof window !== "undefined" && window.crypto?.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return `app-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
+const createAppEntry = (overrides = {}) => ({
+  id: generateEntryId(),
+  path: "",
+  mode: "generic",
+  folderPath: "",
+  extraArgs: "",
+  label: "",
+  ...overrides,
+});
+
+const inferVSCodeMode = (path = "") => {
+  const normalized = path.toLowerCase();
+  return normalized.includes("code.exe") || normalized.includes("visual studio code") || normalized === "code";
+};
+
 export default function AddTemplate() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [apps, setApps] = useState([""]);
+  const [appEntries, setAppEntries] = useState([createAppEntry()]);
   const [websites, setWebsites] = useState([""]);
   const [schedule, setSchedule] = useState("");
   const [showAppTips, setShowAppTips] = useState(false);
@@ -45,13 +70,50 @@ export default function AddTemplate() {
   const navigate = useNavigate();
   const { user } = useAuth(); // check if user is logged in
 
-  const handleAddApp = () => setApps([...apps, ""]);
+  const handleAddApp = () => setAppEntries((prev) => [...prev, createAppEntry()]);
   const handleAddWebsite = () => setWebsites([...websites, ""]);
 
-  const handleAppChange = (index, value) => {
-    const updated = [...apps];
-    updated[index] = value;
-    setApps(updated);
+  const handleAppChange = (index, key, value) => {
+    setAppEntries((prev) =>
+      prev.map((entry, idx) => {
+        if (idx !== index) return entry;
+        if (key === "path") {
+          const detected = inferVSCodeMode(value);
+          const shouldMarkVSCode =
+            entry.mode === "vscode" || (!entry.folderPath && detected === "vscode");
+          return {
+            ...entry,
+            path: value,
+            mode: shouldMarkVSCode ? "vscode" : entry.mode,
+          };
+        }
+        if (key === "folderPath") {
+          const nextValue = value;
+          return {
+            ...entry,
+            folderPath: nextValue,
+            mode: nextValue ? "vscode" : entry.mode,
+          };
+        }
+        return {
+          ...entry,
+          [key]: value,
+        };
+      })
+    );
+  };
+
+  const toggleVSCodeMode = (index) => {
+    setAppEntries((prev) =>
+      prev.map((entry, idx) => {
+        if (idx !== index) return entry;
+        const nextMode = entry.mode === "vscode" ? "generic" : "vscode";
+        return {
+          ...entry,
+          mode: nextMode,
+        };
+      })
+    );
   };
 
   const handleWebsiteChange = (index, value) => {
@@ -61,10 +123,10 @@ export default function AddTemplate() {
   };
 
   const handleRemoveApp = (index) => {
-    if (apps.length > 1) {
-      const updated = apps.filter((_, i) => i !== index);
-      setApps(updated);
-    }
+    setAppEntries((prev) => {
+      if (prev.length <= 1) return prev;
+      return prev.filter((_, i) => i !== index);
+    });
   };
 
   const handleRemoveWebsite = (index) => {
@@ -74,18 +136,57 @@ export default function AddTemplate() {
     }
   };
 
+  const validAppCount = useMemo(
+    () => appEntries.filter((entry) => entry.path.trim().length > 0).length,
+    [appEntries]
+  );
+
+  const validWebsiteCount = useMemo(
+    () => websites.filter((site) => site.trim().length > 0).length,
+    [websites]
+  );
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
 
-    const filteredApps = apps.filter((a) => a.trim() !== "");
+    const sanitizedApps = appEntries
+      .map((entry) => ({
+        ...entry,
+        path: entry.path.trim(),
+        folderPath: (entry.folderPath || "").trim(),
+        extraArgs: (entry.extraArgs || "").trim(),
+        label: (entry.label || "").trim(),
+      }))
+      .filter((entry) => entry.path.length > 0);
+
+    const filteredApps = sanitizedApps.map((entry) => entry.path);
     const filteredWebsites = websites.filter((w) => w.trim() !== "");
+
+    const hasVSCodeWithoutFolder = sanitizedApps.some(
+      (entry) => entry.mode === "vscode" && !entry.folderPath
+    );
+    if (hasVSCodeWithoutFolder) {
+      toast.error("Please provide a folder path for every VS Code entry.");
+      setLoading(false);
+      return;
+    }
+
+    const appLaunchers = sanitizedApps.map((entry) => ({
+      id: entry.id,
+      label: entry.label || undefined,
+      path: entry.path,
+      mode: entry.mode,
+      folderPath: entry.mode === "vscode" ? entry.folderPath || undefined : undefined,
+      args: entry.extraArgs ? entry.extraArgs.split(/\s+/).filter(Boolean) : [],
+    }));
 
     const newTemplate = {
       title: title.trim(),
       description: description.trim(),
       schedule: schedule.trim(),
       apps: filteredApps,
+      appLaunchers,
       websites: filteredWebsites,
     };
 
@@ -302,27 +403,69 @@ export default function AddTemplate() {
                 </div>
               )}
 
-              <div className="space-y-3">
-                {apps.map((app, index) => (
-                  <div key={index} className="flex items-center gap-3">
-                    <div className="flex-1 relative">
+              <div className="space-y-4">
+                {appEntries.map((entry, index) => (
+                  <div
+                    key={entry.id}
+                    className="space-y-3 rounded-2xl border border-gray-800/80 bg-black/40 p-4"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 relative">
+                        <input
+                          type="text"
+                          className="w-full px-4 py-3 bg-black/60 border border-gray-700/50 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all duration-300"
+                          placeholder="C:\\Program Files\\Microsoft VS Code\\Code.exe"
+                          value={entry.path}
+                          onChange={(e) => handleAppChange(index, "path", e.target.value)}
+                        />
+                      </div>
+                      {appEntries.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveApp(index)}
+                          className="flex items-center justify-center w-10 h-10 bg-red-600/20 hover:bg-red-600/30 border border-red-600/30 rounded-xl text-red-400 transition-all duration-300 group"
+                        >
+                          <Minus className="w-4 h-4 group-hover:rotate-90 transition-transform duration-300" />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="flex items-center gap-2 text-sm text-gray-300">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-gray-600 bg-gray-900 text-purple-500 focus:ring-purple-500"
+                          checked={entry.mode === "vscode"}
+                          onChange={() => toggleVSCodeMode(index)}
+                        />
+                        Launch a VS Code folder with this app
+                      </label>
                       <input
                         type="text"
-                        className="w-full px-4 py-3 bg-black/50 border border-gray-700/50 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all duration-300"
-                        placeholder="e.g., Visual Studio Code, Spotify, Chrome, or full path..."
-                        value={app}
-                        onChange={(e) => handleAppChange(index, e.target.value)}
+                        value={entry.label}
+                        onChange={(e) => handleAppChange(index, "label", e.target.value)}
+                        placeholder="Optional nickname (e.g., VS Code - DSA)"
+                        className="w-full px-3 py-2 rounded-lg bg-black/50 border border-gray-700/60 text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
                       />
                     </div>
-                    {apps.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveApp(index)}
-                        className="flex items-center justify-center w-10 h-10 bg-red-600/20 hover:bg-red-600/30 border border-red-600/30 rounded-xl text-red-400 transition-all duration-300 group"
-                      >
-                        <Minus className="w-4 h-4 group-hover:rotate-90 transition-transform duration-300" />
-                      </button>
+
+                    {entry.mode === "vscode" && (
+                      <input
+                        type="text"
+                        className="w-full px-4 py-3 bg-black/60 border border-emerald-600/40 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                        placeholder="Folder to open, e.g., C:\\Projects\\dsa_folder"
+                        value={entry.folderPath}
+                        onChange={(e) => handleAppChange(index, "folderPath", e.target.value)}
+                      />
                     )}
+
+                    <input
+                      type="text"
+                      className="w-full px-4 py-3 bg-black/60 border border-gray-700/50 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                      placeholder="Additional CLI arguments (optional), e.g., --reuse-window"
+                      value={entry.extraArgs}
+                      onChange={(e) => handleAppChange(index, "extraArgs", e.target.value)}
+                    />
                   </div>
                 ))}
               </div>
@@ -452,9 +595,7 @@ export default function AddTemplate() {
             </div>
 
             {/* Validation Info */}
-            {(!title.trim() ||
-              (apps.filter((a) => a.trim()).length === 0 &&
-                websites.filter((w) => w.trim()).length === 0)) && (
+            {(!title.trim() || (validAppCount === 0 && validWebsiteCount === 0)) && (
               <div className="bg-amber-600/10 border border-amber-600/20 rounded-xl p-4">
                 <div className="flex items-center gap-3">
                   <AlertCircle className="w-5 h-5 text-amber-400 flex-shrink-0" />
@@ -462,10 +603,9 @@ export default function AddTemplate() {
                     <p className="font-medium mb-1">Required fields:</p>
                     <ul className="list-disc list-inside space-y-1">
                       {!title.trim() && <li>Template title is required</li>}
-                      {apps.filter((a) => a.trim()).length === 0 &&
-                        websites.filter((w) => w.trim()).length === 0 && (
-                          <li>Add at least one app or website</li>
-                        )}
+                      {validAppCount === 0 && validWebsiteCount === 0 && (
+                        <li>Add at least one app or website</li>
+                      )}
                     </ul>
                   </div>
                 </div>

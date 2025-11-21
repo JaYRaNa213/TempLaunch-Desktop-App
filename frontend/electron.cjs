@@ -32,9 +32,64 @@ const normalizeUrl = (input = "") => {
   return hasScheme ? trimmed : `https://${trimmed}`;
 };
 
+const sanitizeArgs = (args = []) =>
+  Array.isArray(args)
+    ? args.map((arg) => (typeof arg === "string" ? arg.trim() : "")).filter(Boolean)
+    : [];
+
+const normalizeAppEntry = (entry, index = 0) => {
+  if (!entry) return null;
+
+  if (typeof entry === "string") {
+    const trimmed = entry.trim();
+    if (!trimmed) return null;
+    return {
+      id: `app-${index}`,
+      path: trimmed,
+      args: [],
+      mode: "generic",
+    };
+  }
+
+  if (typeof entry === "object") {
+    const rawPath = entry.path || entry.executable || entry.command || "";
+    const pathValue = typeof rawPath === "string" ? rawPath.trim() : "";
+    if (!pathValue) return null;
+
+    const mode =
+      entry.mode === "vscode" ||
+      entry.isVSCode ||
+      (entry.folderPath && !entry.mode)
+        ? "vscode"
+        : "generic";
+
+    const folderPath =
+      typeof entry.folderPath === "string" ? entry.folderPath.trim() : "";
+
+    const normalizedArgs = sanitizeArgs(entry.args);
+    const computedArgs =
+      mode === "vscode" && folderPath
+        ? ["-n", folderPath, ...normalizedArgs]
+        : normalizedArgs;
+
+    return {
+      id: entry.id || entry.key || `app-${index}`,
+      path: pathValue,
+      args: computedArgs,
+      cwd:
+        typeof entry.cwd === "string" && entry.cwd.trim().length
+          ? entry.cwd.trim()
+          : undefined,
+      mode,
+    };
+  }
+
+  return null;
+};
+
 const sanitizeAppEntries = (apps = []) =>
-  apps
-    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+  (Array.isArray(apps) ? apps : [])
+    .map((entry, index) => normalizeAppEntry(entry, index))
     .filter(Boolean);
 
 const resolveExecutablePath = (appPathRaw) => {
@@ -55,19 +110,32 @@ const resolveExecutablePath = (appPathRaw) => {
   return appPath;
 };
 
-const launchApp = async (rawApp) => {
-  const appPath = typeof rawApp === "string" ? rawApp.trim() : "";
+const launchApp = async (rawEntry) => {
+  if (!rawEntry) return false;
+
+  const entry =
+    typeof rawEntry === "string"
+      ? { path: rawEntry.trim(), args: [] }
+      : rawEntry;
+
+  const appPath = typeof entry.path === "string" ? entry.path.trim() : "";
   if (!appPath) return false;
 
   const resolved = resolveExecutablePath(appPath);
   const isExePath = resolved.endsWith(".exe") && existsSync(resolved);
+  const args = Array.isArray(entry.args) ? entry.args : [];
+  const cwd =
+    typeof entry.cwd === "string" && entry.cwd.trim().length
+      ? entry.cwd.trim()
+      : undefined;
 
   if (isExePath) {
     try {
-      spawn(resolved, [], {
+      spawn(resolved, args, {
         detached: true,
         stdio: "ignore",
         shell: true,
+        cwd,
       }).unref();
       console.log(`✅ Launched app: ${resolved}`);
       return true;
@@ -78,10 +146,11 @@ const launchApp = async (rawApp) => {
   }
 
   try {
-    spawn(appPath, [], {
+    spawn(appPath, args, {
       detached: true,
       stdio: "ignore",
       shell: true,
+      cwd,
     }).unref();
     console.log(`✅ Opened CLI app: ${appPath}`);
     return true;

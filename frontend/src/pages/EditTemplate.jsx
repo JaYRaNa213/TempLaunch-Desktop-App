@@ -1,5 +1,5 @@
 // src/pages/EditTemplate.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import { getTemplateById, updateTemplate } from "../services/TemplateService";
@@ -18,6 +18,62 @@ import {
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
+const generateEntryId = () => {
+  if (typeof window !== "undefined" && window.crypto?.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return `app-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
+const createAppEntry = (overrides = {}) => ({
+  id: generateEntryId(),
+  path: "",
+  folderPath: "",
+  extraArgs: "",
+  label: "",
+  mode: "generic",
+  ...overrides,
+});
+
+const inferVSCodeMode = (path = "", folderPath = "") => {
+  if (folderPath) return "vscode";
+  const normalized = path.toLowerCase();
+  return normalized.includes("code.exe") || normalized.includes("visual studio code") || normalized === "code"
+    ? "vscode"
+    : "generic";
+};
+
+const mapTemplateAppsToEntries = (template) => {
+  if (!template) return [createAppEntry()];
+
+  if (Array.isArray(template.appLaunchers) && template.appLaunchers.length) {
+    return template.appLaunchers.map((launcher) =>
+      createAppEntry({
+        id: launcher.id || launcher._id || generateEntryId(),
+        path: launcher.path || launcher.executable || "",
+        folderPath: launcher.folderPath || "",
+        extraArgs: Array.isArray(launcher.args) ? launcher.args.join(" ") : "",
+        label: launcher.label || "",
+        mode: launcher.mode || inferVSCodeMode(launcher.path || "", launcher.folderPath || ""),
+      })
+    );
+  }
+
+  if (Array.isArray(template.apps) && template.apps.length) {
+    return template.apps.map((app) =>
+      createAppEntry({
+        path: app,
+        mode: inferVSCodeMode(app),
+      })
+    );
+  }
+
+  return [createAppEntry()];
+};
+
 export default function EditTemplate() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -31,12 +87,11 @@ export default function EditTemplate() {
   // form fields
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [apps, setApps] = useState([]);
+  const [appEntries, setAppEntries] = useState([createAppEntry()]);
   const [websites, setWebsites] = useState([]);
   const [schedule, setSchedule] = useState("");
 
   // input helpers
-  const [newApp, setNewApp] = useState("");
   const [newWebsite, setNewWebsite] = useState("");
 
   useEffect(() => {
@@ -60,7 +115,7 @@ export default function EditTemplate() {
         setTemplate(data);
         setTitle(data.title || "");
         setDescription(data.description || "");
-        setApps(Array.isArray(data.apps) ? data.apps : []);
+        setAppEntries(mapTemplateAppsToEntries(data));
         setWebsites(Array.isArray(data.websites) ? data.websites : []);
         setSchedule(data.schedule || "");
         setNotFound(false);
@@ -76,19 +131,51 @@ export default function EditTemplate() {
     fetchTemplate();
   }, [id, user, authLoading]);
 
-  const handleAddApp = () => {
-    const value = newApp.trim();
-    if (!value) {
-      toast.error("Please enter an application path");
-      return;
-    }
-    if (apps.includes(value)) {
-      toast.error("Application already added");
-      return;
-    }
-    setApps(prev => [...prev, value]);
-    setNewApp("");
-    toast.success("Application added successfully!");
+  const handleAddAppEntry = () => {
+    setAppEntries((prev) => [...prev, createAppEntry()]);
+  };
+
+  const handleAppEntryChange = (index, key, value) => {
+    setAppEntries((prev) =>
+      prev.map((entry, idx) => {
+        if (idx !== index) return entry;
+        if (key === "path") {
+          const detectedVSCode = inferVSCodeMode(value);
+          return {
+            ...entry,
+            path: value,
+            mode:
+              entry.mode === "vscode" || entry.folderPath
+                ? entry.mode
+                : detectedVSCode,
+          };
+        }
+        if (key === "folderPath") {
+          return {
+            ...entry,
+            folderPath: value,
+            mode: value ? "vscode" : entry.mode,
+          };
+        }
+        return {
+          ...entry,
+          [key]: value,
+        };
+      })
+    );
+  };
+
+  const toggleVSCodeMode = (index) => {
+    setAppEntries((prev) =>
+      prev.map((entry, idx) => {
+        if (idx !== index) return entry;
+        const nextMode = entry.mode === "vscode" ? "generic" : "vscode";
+        return {
+          ...entry,
+          mode: nextMode,
+        };
+      })
+    );
   };
 
   const handleAddWebsite = () => {
@@ -107,8 +194,15 @@ export default function EditTemplate() {
   };
 
   const removeApp = (appToRemove) => {
-    setApps(prev => prev.filter(app => app !== appToRemove));
-    toast.success("Application removed");
+    setAppEntries((prev) => {
+      if (prev.length <= 1) {
+        toast.error("At least one application slot is required.");
+        return prev;
+      }
+      const next = prev.filter((entry) => entry.id !== appToRemove);
+      toast.success("Application removed");
+      return next.length ? next : [createAppEntry()];
+    });
   };
 
   const removeWebsite = (websiteToRemove) => {
@@ -119,12 +213,41 @@ export default function EditTemplate() {
   const handleSave = async () => {
     if (!template) return;
 
+    const sanitizedApps = appEntries
+      .map((entry) => ({
+        ...entry,
+        path: entry.path.trim(),
+        folderPath: (entry.folderPath || "").trim(),
+        extraArgs: (entry.extraArgs || "").trim(),
+        label: (entry.label || "").trim(),
+      }))
+      .filter((entry) => entry.path.length > 0);
+
+    const hasVSCodeWithoutFolder = sanitizedApps.some(
+      (entry) => entry.mode === "vscode" && !entry.folderPath
+    );
+    if (hasVSCodeWithoutFolder) {
+      toast.error("Please provide folder paths for every VS Code entry.");
+      return;
+    }
+
+    const appsPayload = sanitizedApps.map((entry) => entry.path);
+    const appLaunchers = sanitizedApps.map((entry) => ({
+      id: entry.id,
+      label: entry.label || undefined,
+      path: entry.path,
+      mode: entry.mode,
+      folderPath: entry.mode === "vscode" ? entry.folderPath || undefined : undefined,
+      args: entry.extraArgs ? entry.extraArgs.split(/\s+/).filter(Boolean) : [],
+    }));
+
     setSaving(true);
     const updated = {
       ...template,
       title,
       description,
-      apps,
+      apps: appsPayload,
+      appLaunchers,
       websites,
       schedule: schedule || null,
       updatedAt: new Date().toISOString(),
@@ -236,47 +359,84 @@ export default function EditTemplate() {
 
           {/* Applications Section */}
           <div className="space-y-4">
-            <label className="block text-sm font-medium text-gray-300">Applications</label>
-
-            <div className="flex gap-3">
-              <div className="flex-1 relative">
-                <Monitor className="absolute left-3 top-1/2 transform -translate-y-1/2 text-purple-400 w-5 h-5" />
-                <input
-                  value={newApp}
-                  onChange={(e) => setNewApp(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAddApp()}
-                  className="w-full pl-12 pr-4 py-3 rounded-xl bg-gray-800/50 backdrop-blur-xl border border-gray-700/50 text-white focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300 shadow-lg"
-                  placeholder="C:\\Program Files\\YourApp\\app.exe"
-                />
-              </div>
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-medium text-gray-300">Applications</label>
               <button
-                onClick={handleAddApp}
-                className="px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-xl font-medium transition-all duration-300 shadow-lg hover:shadow-xl transform hover:scale-105 flex items-center gap-2"
+                type="button"
+                onClick={handleAddAppEntry}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white text-sm font-medium transition-all duration-300 shadow-lg hover:shadow-xl"
               >
                 <Plus className="w-4 h-4" />
                 Add App
               </button>
             </div>
 
-            {/* Apps List */}
-            {apps.length > 0 && (
-              <div className="bg-gray-800/30 backdrop-blur-xl border border-gray-700/30 rounded-xl p-4">
-                <h4 className="text-sm font-medium text-gray-300 mb-3">Added Applications ({apps.length})</h4>
-                <div className="space-y-2">
-                  {apps.map((app, index) => (
-                    <div key={index} className="flex items-center justify-between bg-gray-700/30 border border-gray-600/30 rounded-lg p-3">
-                      <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <Monitor className="w-4 h-4 text-purple-400 flex-shrink-0" />
-                        <span className="text-sm text-white truncate">{app}</span>
-                      </div>
-                      <button onClick={() => removeApp(app)} className="ml-3 text-gray-400 hover:text-red-400 transition-colors">
+            <div className="space-y-4">
+              {appEntries.map((entry, index) => (
+                <div
+                  key={entry.id}
+                  className="space-y-3 rounded-2xl border border-gray-800/70 bg-gray-900/40 p-4 shadow-inner"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 relative">
+                      <Monitor className="absolute left-3 top-1/2 -translate-y-1/2 text-purple-400 w-5 h-5" />
+                      <input
+                        value={entry.path}
+                        onChange={(e) => handleAppEntryChange(index, "path", e.target.value)}
+                        className="w-full pl-12 pr-4 py-3 rounded-xl bg-black/40 border border-gray-700/60 text-white focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-300"
+                        placeholder="C:\\Program Files\\Microsoft VS Code\\Code.exe"
+                      />
+                    </div>
+                    {appEntries.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeApp(entry.id)}
+                        className="flex items-center justify-center w-10 h-10 rounded-xl bg-red-600/20 border border-red-600/30 text-red-400 hover:bg-red-600/30 transition-all duration-300"
+                      >
                         <X className="w-4 h-4" />
                       </button>
-                    </div>
-                  ))}
+                    )}
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="flex items-center gap-2 text-sm text-gray-300">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-gray-600 bg-gray-900 text-purple-500 focus:ring-purple-500"
+                        checked={entry.mode === "vscode"}
+                        onChange={() => toggleVSCodeMode(index)}
+                      />
+                      Launch a VS Code folder with this app
+                    </label>
+                    <input
+                      type="text"
+                      value={entry.label}
+                      onChange={(e) => handleAppEntryChange(index, "label", e.target.value)}
+                      placeholder="Optional nickname (e.g., VS Code - Frontend)"
+                      className="w-full px-3 py-2 rounded-lg bg-black/50 border border-gray-700/60 text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                    />
+                  </div>
+
+                  {entry.mode === "vscode" && (
+                    <input
+                      type="text"
+                      value={entry.folderPath}
+                      onChange={(e) => handleAppEntryChange(index, "folderPath", e.target.value)}
+                      placeholder="Folder to open, e.g., C:\\Projects\\frontend"
+                      className="w-full px-4 py-3 rounded-xl bg-black/40 border border-emerald-600/40 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                    />
+                  )}
+
+                  <input
+                    type="text"
+                    value={entry.extraArgs}
+                    onChange={(e) => handleAppEntryChange(index, "extraArgs", e.target.value)}
+                    placeholder="Additional CLI arguments (optional)"
+                    className="w-full px-4 py-3 rounded-xl bg-black/40 border border-gray-700/60 text-white focus:outline-none focus:ring-1 focus:ring-green-500"
+                  />
                 </div>
-              </div>
-            )}
+              ))}
+            </div>
           </div>
 
           {/* Websites Section */}

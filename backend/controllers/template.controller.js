@@ -1,5 +1,8 @@
 import Template from "../models/template.model.js";
 
+const normalizeString = (value) =>
+  typeof value === "string" ? value.trim() : "";
+
 /**
  * Helper: get guest id from request
  * If none provided, returns null
@@ -15,18 +18,110 @@ const generateGuestId = () => {
   return `guest_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e6).toString(36)}`;
 };
 
+const sanitizeAppStrings = (apps = []) =>
+  Array.isArray(apps)
+    ? apps
+        .map((app) => (typeof app === "string" ? app.trim() : ""))
+        .filter(Boolean)
+    : [];
+
+const sanitizeAppLaunchers = (rawEntries = [], fallbackApps = []) => {
+  const maybeArray = Array.isArray(rawEntries) ? rawEntries : [];
+  const fallback = Array.isArray(fallbackApps) ? fallbackApps : [];
+
+  return maybeArray
+    .map((entry, index) => {
+      if (!entry) return null;
+
+      if (typeof entry === "string") {
+        const trimmed = normalizeString(entry);
+        if (!trimmed) return null;
+        return {
+          path: trimmed,
+          args: [],
+          mode: "generic",
+        };
+      }
+
+      if (typeof entry === "object") {
+        const rawPath =
+          entry.path ||
+          entry.executable ||
+          entry.command ||
+          fallback[index] ||
+          "";
+        const path = normalizeString(rawPath);
+        if (!path) return null;
+
+        const args = Array.isArray(entry.args)
+          ? entry.args.map(normalizeString).filter(Boolean)
+          : [];
+        const folderPath = normalizeString(entry.folderPath || entry.workspaceFolder);
+        const mode =
+          entry.mode === "vscode" ||
+          entry.isVSCode ||
+          (!entry.mode && folderPath)
+            ? "vscode"
+            : "generic";
+
+        return {
+          id: normalizeString(entry.id || entry.key) || undefined,
+          label: normalizeString(entry.label) || undefined,
+          path,
+          args,
+          cwd: normalizeString(entry.cwd) || undefined,
+          mode,
+          folderPath: folderPath || undefined,
+        };
+      }
+
+      return null;
+    })
+    .filter(Boolean);
+};
+
+const buildDefaultAppLaunchers = (apps = []) => {
+  if (!Array.isArray(apps)) return [];
+  return sanitizeAppLaunchers(
+    apps.map((app) => (typeof app === "string" ? app : "")),
+    apps
+  );
+};
+
 // Build payload for createTemplate; if no guestId provided, we generate one
 const buildTemplatePayload = (req) => {
-  const { title, description, apps = [], websites = [], schedule = null } = req.body || {};
+  const {
+    title,
+    description,
+    apps = [],
+    websites = [],
+    schedule = null,
+    appLaunchers = [],
+  } = req.body || {};
+
+  const sanitizedAppStrings = sanitizeAppStrings(apps);
 
   const payload = {
     title,
     description,
-    apps,
+    apps: sanitizedAppStrings,
     websites,
     schedule,
     usageCount: 0,
   };
+
+  const sanitizedLaunchers = sanitizeAppLaunchers(
+    appLaunchers,
+    sanitizedAppStrings
+  );
+  payload.appLaunchers =
+    sanitizedLaunchers.length > 0
+      ? sanitizedLaunchers
+      : buildDefaultAppLaunchers(sanitizedAppStrings);
+
+  if (!sanitizedAppStrings.length && payload.appLaunchers.length) {
+    payload.apps = payload.appLaunchers.map((launcher) => launcher.path);
+  }
 
   if (req.user) {
     payload.userId = req.user._id || req.user.id;
@@ -178,7 +273,15 @@ export const deleteTemplate = async (req, res, next) => {
 export const EditTemplate = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { title, description, apps, websites, schedule, guestName } = req.body || {};
+    const {
+      title,
+      description,
+      apps,
+      websites,
+      schedule,
+      guestName,
+      appLaunchers,
+    } = req.body || {};
 
     const template = await Template.findById(id);
     if (!template) {
@@ -187,7 +290,19 @@ export const EditTemplate = async (req, res, next) => {
 
     if (title !== undefined) template.title = title;
     if (description !== undefined) template.description = description;
-    if (apps !== undefined) template.apps = apps;
+    if (apps !== undefined) template.apps = sanitizeAppStrings(apps);
+    if (appLaunchers !== undefined) {
+      const sanitizedLaunchers = sanitizeAppLaunchers(
+        appLaunchers,
+        (apps !== undefined ? sanitizeAppStrings(apps) : template.apps) ?? []
+      );
+      template.appLaunchers =
+        sanitizedLaunchers.length > 0
+          ? sanitizedLaunchers
+          : buildDefaultAppLaunchers(template.apps);
+    } else if ((!apps || !apps.length) && template.appLaunchers?.length) {
+      template.apps = template.appLaunchers.map((launcher) => launcher.path);
+    }
     if (websites !== undefined) template.websites = websites;
     if (schedule !== undefined) template.schedule = schedule;
     if (guestName !== undefined) template.guestName = guestName;
