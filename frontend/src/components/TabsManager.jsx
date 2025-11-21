@@ -14,7 +14,7 @@ export default function TabsManager() {
   const electronAPI = useElectronAPI();
   const [tabs, setTabs] = useState([]);
   const [activeTab, setActiveTab] = useState(-1);
-  const [workspaceVisible, setWorkspaceVisible] = useState(true);
+  const [workspaceVisible, setWorkspaceVisible] = useState(false);
   const location = useLocation();
 
   const isElectron = Boolean(electronAPI);
@@ -70,6 +70,16 @@ export default function TabsManager() {
   const inTemplatesArea =
     typeof location.pathname === "string" &&
     (location.pathname.startsWith("/templates") || location.pathname.startsWith("/template"));
+
+  useEffect(() => {
+    if (!electronAPI) return;
+    if (!inTemplatesArea) {
+      electronAPI.hideAllBrowserViews?.();
+      setWorkspaceVisible((prev) => (prev ? false : prev));
+    } else if (workspaceVisible) {
+      electronAPI.restoreActiveBrowserView?.();
+    }
+  }, [electronAPI, inTemplatesArea, workspaceVisible]);
 
   const toggleWorkspace = () => {
     if (!isElectron) return;
