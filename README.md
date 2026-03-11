@@ -243,7 +243,7 @@ Jay Rana
 GitHub • LinkedIn
 
 📄 License
-Licensed under the MIT License © 2025 — Jay Rana
+Licensed under the MIT License © 2025 — Jay Rana (@JaYRaNa213)
 
 yaml
 Copy
@@ -260,6 +260,9 @@ Let me know if you'd like:
 Would you like me to include `.exe` download links or usage instructions too?
 
 
+© 2025 Jay Rana (@JaYRaNa213)
+
+The Templaunch concept and implementation were originally developed by Jay Rana.
 
 
 
